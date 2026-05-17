@@ -25,4 +25,7 @@ export class User {
 
   @Column('timestamp', { nullable: true })
   resetCodeExpiresAt: Date | null;
+
+  @Column('boolean', { default: false })
+  approved: boolean;
 }

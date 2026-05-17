@@ -1,15 +1,23 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User)
     private usersRepository: Repository<User>,
+    private mailService: MailService,
   ) {}
 
   async create(createUserDto: CreateUserDto): Promise<User> {
@@ -21,12 +29,34 @@ export class UsersService {
       throw new ConflictException('E-mail já cadastrado');
     }
 
-    const user = this.usersRepository.create(createUserDto);
+    // If there is no admin yet, make this first created account the admin and approve it
+    const adminCount = await this.usersRepository.count({
+      where: { role: 'admin' },
+    });
+    const roleToSet = adminCount === 0 ? 'admin' : createUserDto.role || 'user';
+    const approvedToSet = adminCount === 0 ? true : false;
+
+    const user = this.usersRepository.create({
+      ...createUserDto,
+      role: roleToSet,
+      approved: approvedToSet,
+    } as Partial<User>);
+
     return this.usersRepository.save(user);
   }
 
   async findAll(): Promise<User[]> {
     return this.usersRepository.find();
+  }
+
+  async findPending(): Promise<User[]> {
+    return this.usersRepository.find({ where: { approved: false } });
+  }
+
+  async approveUser(id: string): Promise<User> {
+    const user = await this.findById(id);
+    user.approved = true;
+    return this.usersRepository.save(user);
   }
 
   async findById(id: string): Promise<User> {
@@ -66,8 +96,8 @@ export class UsersService {
     await this.usersRepository.remove(user);
   }
 
-  // Generate and store a reset code (dev: returns code so UI can show it)
-  async requestPasswordReset(email: string): Promise<{ success: boolean; code?: string }>{
+  // Generate and store a reset code and send it by e-mail
+  async requestPasswordReset(email: string): Promise<{ success: boolean }> {
     const user = await this.usersRepository.findOne({ where: { email } });
     if (!user) {
       throw new NotFoundException('Usuário não encontrado');
@@ -81,18 +111,38 @@ export class UsersService {
 
     await this.usersRepository.save(user);
 
-    // In production you'd send the code by email and not return it
-    return { success: true, code };
+    const subject = 'Recuperação de senha - Código de verificação';
+    const text = `Você solicitou a recuperação de senha.\n\nSeu código de verificação é: ${code}\nEle expira em 15 minutos.`;
+
+    try {
+      await this.mailService.sendMail(user.email, subject, text);
+    } catch (err) {
+      // remove code if e-mail couldn't be sent
+      user.resetCode = null;
+      user.resetCodeExpiresAt = null;
+      await this.usersRepository.save(user);
+      throw new InternalServerErrorException(
+        'Falha ao enviar e-mail de recuperação',
+      );
+    }
+
+    return { success: true };
   }
 
-  async resetPassword(email: string, code: string, newPassword: string): Promise<{ success: boolean }>{
+  async resetPassword(
+    email: string,
+    code: string,
+    newPassword: string,
+  ): Promise<{ success: boolean }> {
     const user = await this.usersRepository.findOne({ where: { email } });
     if (!user) {
       throw new NotFoundException('Usuário não encontrado');
     }
 
     if (!user.resetCode || !user.resetCodeExpiresAt) {
-      throw new BadRequestException('Nenhum código de recuperação foi solicitado');
+      throw new BadRequestException(
+        'Nenhum código de recuperação foi solicitado',
+      );
     }
 
     const now = new Date();

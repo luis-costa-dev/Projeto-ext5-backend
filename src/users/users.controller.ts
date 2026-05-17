@@ -22,8 +22,15 @@ export class UsersController {
     return this.usersService.requestPasswordReset(email);
   }
 
+  @Get('pending')
+  async getPending() {
+    return this.usersService.findPending();
+  }
+
   @Post('reset-password')
-  async resetPassword(@Body() body: { email: string; code: string; newPassword: string }) {
+  async resetPassword(
+    @Body() body: { email: string; code: string; newPassword: string },
+  ) {
     const { email, code, newPassword } = body;
     return this.usersService.resetPassword(email, code, newPassword);
   }
@@ -50,10 +57,7 @@ export class UsersController {
   }
 
   @Put(':id')
-  async update(
-    @Param('id') id: string,
-    @Body() updateUserDto: UpdateUserDto,
-  ) {
+  async update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
     return this.usersService.update(id, updateUserDto);
   }
 
@@ -61,5 +65,10 @@ export class UsersController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id') id: string) {
     await this.usersService.remove(id);
+  }
+
+  @Put(':id/approve')
+  async approve(@Param('id') id: string) {
+    return this.usersService.approveUser(id);
   }
 }
