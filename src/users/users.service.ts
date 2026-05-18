@@ -25,6 +25,21 @@ export class UsersService {
       where: { email: createUserDto.email },
     });
 
+    // Debug logs to help investigate unexpected 'E-mail já cadastrado' responses
+    try {
+      // eslint-disable-next-line no-console
+      console.log('[UsersService.create] incoming email:', createUserDto.email);
+      // eslint-disable-next-line no-console
+      console.log(
+        '[UsersService.create] existingUser:',
+        existingUser
+          ? { id: existingUser.id, email: existingUser.email }
+          : null,
+      );
+    } catch (err) {
+      // ignore logging errors
+    }
+
     if (existingUser) {
       throw new ConflictException('E-mail já cadastrado');
     }
